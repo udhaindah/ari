@@ -7,8 +7,8 @@ import string
 import names
 from colorama import Fore, Style, init
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from fake_useragent import UserAgent  # Library untuk generate User-Agent
+from fake_useragent import UserAgent
+import threading
 
 init()
 
@@ -49,14 +49,14 @@ def get_random_domain(proxy_dict, current=None, total=None):
     url = f"https://generator.email/search.php?key={keyword}"
     
     try:
-        headers = {'User-Agent': ua.random}  # Gunakan User-Agent acak
+        headers = {'User-Agent': ua.android}
         resp = requests.get(url, proxies=proxy_dict, headers=headers, timeout=120)
         resp.raise_for_status()
         domains = resp.json()
         
         valid_domains = [
             domain for domain in domains 
-            if domain.count('.') == 1 and domain.encode('utf-8')
+            if domain.encode('utf-8')
         ]
         
         if not valid_domains:
@@ -117,7 +117,7 @@ def check_inbox(email, proxy_dict, retries=9, current=None, total=None):
         'cookie': f'embx=%5B%{email}%40{email_domain}%22%2C%{email}%40{email_domain}%22%5D; surl={email_domain}/{email_username}',
         'sec-ch-ua-mobile': '?1',
         'sec-ch-ua-platform': '"Android"',
-        'user-agent': ua.random  # Gunakan User-Agent acak
+        'user-agent': ua.android
     }
 
     pattern = r'<b style="letter-spacing: 16px; color: #fff; font-size: 40px; font-weight: 600;[^>]*>(\d{6})</b>'
@@ -263,36 +263,43 @@ def get_referral_code():
         log('Please enter a valid referral code.', Fore.YELLOW)
 
 def process_single_referral(index, total_referrals, proxy_dict, target_address, ref_code, headers):
-    while True:
+    try:
         print(f"{Fore.CYAN}\nStarting new referral process\n{Style.RESET_ALL}")
 
         email = generate_email(proxy_dict, index, total_referrals)
         if not email:
-            log("Failed to generate email. Retrying...", Fore.RED, index, total_referrals)
-            continue
+            log("Failed to generate email.", Fore.RED, index, total_referrals)
+            return False
 
         password = generate_password()
         log(f"Generated account: {email}:{password}", Fore.CYAN, index, total_referrals)
 
         if not send_otp(email, proxy_dict, headers, index, total_referrals):
-            log("Failed to send OTP. Retrying...", Fore.RED, index, total_referrals)
-            continue
+            log("Failed to send OTP.", Fore.RED, index, total_referrals)
+            return False
 
         valid_code = check_inbox(email, proxy_dict, 9, index, total_referrals)
         if not valid_code:
-            log("Failed to get OTP code. Starting with new email...", Fore.RED, index, total_referrals)
-            continue
+            log("Failed to get OTP code.", Fore.RED, index, total_referrals)
+            return False
 
         address = verify_otp(email, valid_code, password, proxy_dict, ref_code, headers, index, total_referrals)
         if not address:
-            log("Failed to verify OTP. Starting with new email...", Fore.RED, index, total_referrals)
-            continue
+            log("Failed to verify OTP.", Fore.RED, index, total_referrals)
+            return False
 
         daily_claim(address, proxy_dict, headers, index, total_referrals)
         auto_send(email, target_address, password, proxy_dict, headers, index, total_referrals)
         
-        log(f"Referral #{index} success!", Fore.YELLOW, index, total_referrals)
+        log(f"Referral #{index} completed successfully!", Fore.GREEN, index, total_referrals)
         return True
+        
+    except Exception as e:
+        log(f"Error occurred: {str(e)}.", Fore.RED, index, total_referrals)
+        return False
+
+def worker(index, total_referrals, proxy_dict, target_address, ref_code, headers):
+    process_single_referral(index, total_referrals, proxy_dict, target_address, ref_code, headers)
 
 def main():
     print_banner()
@@ -313,21 +320,22 @@ def main():
     headers = {
         'Accept': "application/json",
         'Accept-Encoding': "gzip",
-        'User-Agent': ua.random  # Gunakan User-Agent acak
+        'User-Agent': ua.android
     }
     
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = []
-        for index in range(1, total_referrals + 1):
-            proxy = get_random_proxy(proxies)
-            proxy_dict = {"http": proxy, "https": proxy} if proxy else None
-            futures.append(executor.submit(process_single_referral, index, total_referrals, proxy_dict, target_address, ref_code, headers))
+    threads = []
+    for index in range(1, total_referrals + 1):
+        proxy = get_random_proxy(proxies)
+        proxy_dict = {"http": proxy, "https": proxy} if proxy else None
         
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                log(f"An error occurred: {e}", Fore.RED)
+        thread = threading.Thread(target=worker, args=(index, total_referrals, proxy_dict, target_address, ref_code, headers))
+        threads.append(thread)
+        thread.start()
+    
+    for thread in threads:
+        thread.join()
+    
+    log(f"\nAll referrals completed", Fore.CYAN)
 
 if __name__ == "__main__":
     try:
