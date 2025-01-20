@@ -7,32 +7,20 @@ import string
 import names
 from colorama import Fore, Style, init
 from datetime import datetime
-import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from fake_useragent import UserAgent
 
-# Inisialisasi Colorama
 init()
 
-# Daftar User-Agent Android statis
-ANDROID_USER_AGENTS = [
-    'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; SM-A536B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; SM-A346B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; SM-A236B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; M2101K6G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 12; moto g(30)) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 12; CPH2211) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; V2169) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36'
-]
+ua = UserAgent()
 
 def get_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-def log(message, color=Fore.WHITE, thread_id=None):
+def log(message, color=Fore.WHITE, current=None, total=None):
     timestamp = f"[{Fore.LIGHTBLACK_EX}{get_timestamp()}{Style.RESET_ALL}]"
-    thread_info = f"[Thread-{thread_id}]" if thread_id is not None else ""
-    print(f"{timestamp} {thread_info} {color}{message}{Style.RESET_ALL}")
+    progress = f"[{Fore.LIGHTBLACK_EX}{current}/{total}{Style.RESET_ALL}]" if current is not None and total is not None else ""
+    print(f"{timestamp} {progress} {color}{message}{Style.RESET_ALL}")
 
 def ask(message):
     return input(f"{Fore.YELLOW}{message}{Style.RESET_ALL}")
@@ -41,10 +29,10 @@ def load_proxies():
     try:
         with open("proxies.txt", "r") as file:
             proxies = [line.strip() for line in file if line.strip()]
-        log(f"Loaded {len(proxies)} proxies", Fore.GREEN)
+        print(f"{Fore.GREEN}\nLoaded {len(proxies)} proxies{Style.RESET_ALL}")
         return proxies
     except FileNotFoundError:
-        log("File proxies.txt not found", Fore.RED)
+        print(f"{Fore.RED}\nFile proxies.txt not found{Style.RESET_ALL}")
         return []
 
 def get_random_proxy(proxies):
@@ -55,12 +43,12 @@ def generate_keyword():
     consonants = ''.join(set(string.ascii_lowercase) - set(vowels))
     return random.choice(consonants) + random.choice(vowels)
 
-def get_random_domain(proxy_dict, thread_id):
+def get_random_domain(proxy_dict, current=None, total=None):
     keyword = generate_keyword()
     url = f"https://generator.email/search.php?key={keyword}"
     
     try:
-        headers = {'User-Agent': random.choice(ANDROID_USER_AGENTS)}
+        headers = {'User-Agent': ua.android}
         resp = requests.get(url, proxies=proxy_dict, headers=headers, timeout=120)
         resp.raise_for_status()
         domains = resp.json()
@@ -71,13 +59,13 @@ def get_random_domain(proxy_dict, thread_id):
         ]
         
         if not valid_domains:
-            log("No valid domains found", Fore.YELLOW, thread_id)
+            log("No valid domains found", Fore.YELLOW, current, total)
             return None
             
         return random.choice(valid_domains)
         
     except Exception as e:
-        log(f"Error fetching domain: {str(e)}", Fore.RED, thread_id)
+        log(f"Error fetching domain: {str(e)}", Fore.RED, current, total)
         return None
 
 def generate_username():
@@ -92,14 +80,14 @@ def generate_password():
     numbers = ''.join(random.choices(string.digits, k=3))
     return f"{word.capitalize()}@{numbers}#"
 
-def generate_email(proxy_dict, thread_id):
-    domain = get_random_domain(proxy_dict, thread_id)
+def generate_email(proxy_dict, current=None, total=None):
+    domain = get_random_domain(proxy_dict, current, total)
     if not domain:
         return None
     username = generate_username()
     return f"{username}@{domain}"
 
-def send_otp(email, proxy_dict, headers, thread_id):
+def send_otp(email, proxy_dict, headers, current=None, total=None):
     url = "https://arichain.io/api/email/send_valid_email"
     payload = {
         'blockchain': "testnet",
@@ -111,13 +99,13 @@ def send_otp(email, proxy_dict, headers, thread_id):
     try:
         response = requests.post(url, data=payload, headers=headers, proxies=proxy_dict, timeout=120)
         response.raise_for_status()
-        log(f"OTP code sent to {email}", Fore.YELLOW, thread_id)
+        log(f"OTP code sent to {email}", Fore.YELLOW, current, total)
         return True
     except requests.RequestException as e:
-        log(f"Failed to send OTP: {e}", Fore.RED, thread_id)
+        log(f"Failed to send OTP: {e}", Fore.RED, current, total)
         return False
 
-def check_inbox(email, proxy_dict, retries=9, thread_id=None):
+def check_inbox(email, proxy_dict, retries=9, current=None, total=None):
     email_username, email_domain = email.split('@')
     
     headers = {
@@ -128,16 +116,16 @@ def check_inbox(email, proxy_dict, retries=9, thread_id=None):
         'cookie': f'embx=%5B%{email}%40{email_domain}%22%2C%{email}%40{email_domain}%22%5D; surl={email_domain}/{email_username}',
         'sec-ch-ua-mobile': '?1',
         'sec-ch-ua-platform': '"Android"',
-        'user-agent': random.choice(ANDROID_USER_AGENTS)
+        'user-agent': ua.android
     }
 
     pattern = r'<b style="letter-spacing: 16px; color: #fff; font-size: 40px; font-weight: 600;[^>]*>(\d{6})</b>'
     
-    log("Checking inboxes for OTP code...", Fore.CYAN, thread_id)
+    log("Checking inboxes for OTP code...", Fore.CYAN, current, total)
     
     for inbox_num in range(1, retries + 1):
         try:
-            log(f"Checking inbox {inbox_num}...", Fore.CYAN, thread_id)
+            log(f"Checking inbox {inbox_num}...", Fore.CYAN, current, total)
             url = f"https://generator.email/inbox{inbox_num}/"
             
             response = requests.get(url, headers=headers, proxies=proxy_dict, timeout=120)
@@ -146,16 +134,16 @@ def check_inbox(email, proxy_dict, retries=9, thread_id=None):
             match = re.search(pattern, response.text)
             if match:
                 code = match.group(1)
-                log(f"Found OTP: {code}", Fore.YELLOW, thread_id)
+                log(f"Found OTP: {code}", Fore.YELLOW, current, total)
                 return code
             
         except requests.RequestException as e:
-            log(f"Failed to check inbox {inbox_num}: {e}", Fore.RED, thread_id)
+            log(f"Failed to check inbox {inbox_num}: {e}", Fore.RED, current, total)
     
-    log("No OTP code found in any inbox", Fore.YELLOW, thread_id)
+    log("No OTP code found in any inbox", Fore.YELLOW, current, total)
     return None
 
-def verify_otp(email, valid_code, password, proxy_dict, invite_code, headers, thread_id):
+def verify_otp(email, valid_code, password, proxy_dict, invite_code, headers, current=None, total=None):
     url = "https://arichain.io/api/account/signup_mobile"
     payload = {
         'blockchain': "testnet",
@@ -173,7 +161,7 @@ def verify_otp(email, valid_code, password, proxy_dict, invite_code, headers, th
         response = requests.post(url, data=payload, headers=headers, proxies=proxy_dict, timeout=120)
         response.raise_for_status()
         result = response.json()
-        log(f"Success Register with referral code {invite_code}", Fore.GREEN, thread_id)
+        log(f"Success Register with referral code {invite_code}", Fore.GREEN, current, total)
 
         with open("accounts.txt", "a") as file:
             file.write(f"{result['result']['session_code']}|{email}|{password}|{result['result']['address']}|{result['result']['master_key']}\n")
@@ -181,10 +169,10 @@ def verify_otp(email, valid_code, password, proxy_dict, invite_code, headers, th
         return result['result']['address']
 
     except requests.RequestException as e:
-        log(f"Failed to verify OTP: {e}", Fore.RED, thread_id)
+        log(f"Failed to verify OTP: {e}", Fore.RED, current, total)
         return None
 
-def daily_claim(address, proxy_dict, headers, thread_id):
+def daily_claim(address, proxy_dict, headers, current=None, total=None):
     url = "https://arichain.io/api/event/checkin"
     payload = {
         'blockchain': "testnet",
@@ -200,15 +188,15 @@ def daily_claim(address, proxy_dict, headers, thread_id):
         data = response.json()
 
         if data.get('status') == 'success':
-            log("Success claim Daily", Fore.GREEN, thread_id)
+            log("Success claim Daily", Fore.GREEN, current, total)
             return True
-        log("Daily claim failed", Fore.RED, thread_id)
+        log("Daily claim failed", Fore.RED, current, total)
         return False
     except requests.exceptions.RequestException as e:
-        log(f"Daily claim error: {str(e)}", Fore.RED, thread_id)
+        log(f"Daily claim error: {str(e)}", Fore.RED, current, total)
         return False
 
-def auto_send(email, to_address, password, proxy_dict, headers, thread_id):
+def auto_send(email, to_address, password, proxy_dict, headers, current=None, total=None):
     url = "https://arichain.io/api/wallet/transfer_mobile"
     
     payload = {
@@ -231,14 +219,14 @@ def auto_send(email, to_address, password, proxy_dict, headers, thread_id):
         result = response.json()
         
         if result.get("status") == "success" and result.get("result") == "success":
-            log(f"Success sent 60 ARI to {to_address}", Fore.GREEN, thread_id)
+            log(f"Success sent 60 ARI to {to_address}", Fore.GREEN, current, total)
             return True
         else:
-            log(f"Failed to send: {result}", Fore.RED, thread_id)
+            log(f"Failed to send: {result}", Fore.RED, current, total)
             return False
             
     except requests.RequestException as e:
-        log(f"Auto-send failed: {e}", Fore.RED, thread_id)
+        log(f"Auto-send failed: {e}", Fore.RED, current, total)
         return False
 
 def print_banner():
@@ -273,44 +261,41 @@ def get_referral_code():
             return code
         log('Please enter a valid referral code.', Fore.YELLOW)
 
-def process_single_referral(thread_id, total_referrals, proxy_dict, target_address, ref_code, headers):
+def process_single_referral(index, total_referrals, proxy_dict, target_address, ref_code, headers):
     try:
-        log(f"Starting new referral process", Fore.CYAN, thread_id)
+        print(f"{Fore.CYAN}\nStarting new referral process\n{Style.RESET_ALL}")
 
-        email = generate_email(proxy_dict, thread_id)
+        email = generate_email(proxy_dict, index, total_referrals)
         if not email:
-            log("Failed to generate email.", Fore.RED, thread_id)
+            log("Failed to generate email.", Fore.RED, index, total_referrals)
             return False
 
         password = generate_password()
-        log(f"Generated account: {email}:{password}", Fore.CYAN, thread_id)
+        log(f"Generated account: {email}:{password}", Fore.CYAN, index, total_referrals)
 
-        if not send_otp(email, proxy_dict, headers, thread_id):
-            log("Failed to send OTP.", Fore.RED, thread_id)
+        if not send_otp(email, proxy_dict, headers, index, total_referrals):
+            log("Failed to send OTP.", Fore.RED, index, total_referrals)
             return False
 
-        valid_code = check_inbox(email, proxy_dict, 9, thread_id)
+        valid_code = check_inbox(email, proxy_dict, 9, index, total_referrals)
         if not valid_code:
-            log("Failed to get OTP code.", Fore.RED, thread_id)
+            log("Failed to get OTP code.", Fore.RED, index, total_referrals)
             return False
 
-        address = verify_otp(email, valid_code, password, proxy_dict, ref_code, headers, thread_id)
+        address = verify_otp(email, valid_code, password, proxy_dict, ref_code, headers, index, total_referrals)
         if not address:
-            log("Failed to verify OTP.", Fore.RED, thread_id)
+            log("Failed to verify OTP.", Fore.RED, index, total_referrals)
             return False
 
-        daily_claim(address, proxy_dict, headers, thread_id)
-        auto_send(email, target_address, password, proxy_dict, headers, thread_id)
+        daily_claim(address, proxy_dict, headers, index, total_referrals)
+        auto_send(email, target_address, password, proxy_dict, headers, index, total_referrals)
         
-        log(f"Referral completed successfully!", Fore.GREEN, thread_id)
+        log(f"Referral #{index} completed successfully!", Fore.GREEN, index, total_referrals)
         return True
         
     except Exception as e:
-        log(f"Error occurred: {str(e)}.", Fore.RED, thread_id)
+        log(f"Error occurred: {str(e)}.", Fore.RED, index, total_referrals)
         return False
-
-def worker(thread_id, total_referrals, proxy_dict, target_address, ref_code, headers):
-    process_single_referral(thread_id, total_referrals, proxy_dict, target_address, ref_code, headers)
 
 def main():
     print_banner()
@@ -331,22 +316,22 @@ def main():
     headers = {
         'Accept': "application/json",
         'Accept-Encoding': "gzip",
-        'User-Agent': random.choice(ANDROID_USER_AGENTS)
+        'User-Agent': ua.android
     }
     
-    threads = []
-    for thread_id in range(1, total_referrals + 1):
-        proxy = get_random_proxy(proxies)
-        proxy_dict = {"http": proxy, "https": proxy} if proxy else None
+    successful_referrals = 0
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = []
+        for index in range(1, total_referrals + 1):
+            proxy = get_random_proxy(proxies)
+            proxy_dict = {"http": proxy, "https": proxy} if proxy else None
+            futures.append(executor.submit(process_single_referral, index, total_referrals, proxy_dict, target_address, ref_code, headers))
         
-        thread = threading.Thread(target=worker, args=(thread_id, total_referrals, proxy_dict, target_address, ref_code, headers))
-        threads.append(thread)
-        thread.start()
+        for future in as_completed(futures):
+            if future.result():
+                successful_referrals += 1
     
-    for thread in threads:
-        thread.join()
-    
-    log(f"\nAll referrals completed", Fore.CYAN)
+    log(f"\nCompleted {successful_referrals}/{total_referrals} successful referrals", Fore.CYAN)
 
 if __name__ == "__main__":
     try:
