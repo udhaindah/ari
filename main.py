@@ -277,17 +277,30 @@ def process_single_referral(index, total_referrals, proxy_dict, target_address, 
             log("Failed to send OTP.", Fore.RED, index, total_referrals)
             return False
 
+        # Delay sebelum check inbox
+        time.sleep(5)  # Jeda 5 detik
+
         valid_code = check_inbox(email, proxy_dict, 9, index, total_referrals)
         if not valid_code:
             log("Failed to get OTP code.", Fore.RED, index, total_referrals)
             return False
+
+        # Delay sebelum verify OTP
+        time.sleep(5)  # Jeda 5 detik
 
         address = verify_otp(email, valid_code, password, proxy_dict, ref_code, headers, index, total_referrals)
         if not address:
             log("Failed to verify OTP.", Fore.RED, index, total_referrals)
             return False
 
+        # Delay sebelum daily claim
+        time.sleep(5)  # Jeda 5 detik
+
         daily_claim(address, proxy_dict, headers, index, total_referrals)
+
+        # Delay sebelum auto-send
+        time.sleep(5)  # Jeda 5 detik
+
         auto_send(email, target_address, password, proxy_dict, headers, index, total_referrals)
         
         log(f"Referral #{index} completed successfully!", Fore.GREEN, index, total_referrals)
@@ -320,12 +333,15 @@ def main():
     }
     
     successful_referrals = 0
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:  # Batasi thread maksimal 5
         futures = []
         for index in range(1, total_referrals + 1):
             proxy = get_random_proxy(proxies)
             proxy_dict = {"http": proxy, "https": proxy} if proxy else None
             futures.append(executor.submit(process_single_referral, index, total_referrals, proxy_dict, target_address, ref_code, headers))
+            
+            # Delay sebelum memulai proses berikutnya
+            time.sleep(10)  # Jeda 10 detik antara setiap proses
         
         for future in as_completed(futures):
             if future.result():
