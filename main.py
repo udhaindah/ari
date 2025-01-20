@@ -7,6 +7,7 @@ import string
 import names
 from colorama import Fore, Style, init
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 init()
 
@@ -324,14 +325,18 @@ def main():
         'User-Agent': random.choice(ANDROID_USER_AGENTS)
     }
     
-    for index in range(1, total_referrals + 1):
-        proxy = get_random_proxy(proxies)
-        proxy_dict = {"http": proxy, "https": proxy} if proxy else None
-        
-        while not process_single_referral(index, total_referrals, proxy_dict, target_address, ref_code, headers):
-            log(f"Retrying referral #{index}", Fore.YELLOW, index, total_referrals)
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = []
+        for index in range(1, total_referrals + 1):
             proxy = get_random_proxy(proxies)
             proxy_dict = {"http": proxy, "https": proxy} if proxy else None
+            futures.append(executor.submit(process_single_referral, index, total_referrals, proxy_dict, target_address, ref_code, headers))
+        
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                log(f"An error occurred: {e}", Fore.RED)
 
 if __name__ == "__main__":
     try:
