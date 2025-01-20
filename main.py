@@ -10,6 +10,7 @@ from datetime import datetime
 from fake_useragent import UserAgent
 import threading
 
+# Inisialisasi Colorama
 init()
 
 # Inisialisasi UserAgent
@@ -30,10 +31,10 @@ def load_proxies():
     try:
         with open("proxies.txt", "r") as file:
             proxies = [line.strip() for line in file if line.strip()]
-        print(f"{Fore.GREEN}\nLoaded {len(proxies)} proxies{Style.RESET_ALL}")
+        log(f"Loaded {len(proxies)} proxies", Fore.GREEN)
         return proxies
     except FileNotFoundError:
-        print(f"{Fore.RED}\nFile proxies.txt not found{Style.RESET_ALL}")
+        log("File proxies.txt not found", Fore.RED)
         return []
 
 def get_random_proxy(proxies):
@@ -264,7 +265,7 @@ def get_referral_code():
 
 def process_single_referral(index, total_referrals, proxy_dict, target_address, ref_code, headers):
     try:
-        print(f"{Fore.CYAN}\nStarting new referral process\n{Style.RESET_ALL}")
+        log(f"Starting new referral process", Fore.CYAN, index, total_referrals)
 
         email = generate_email(proxy_dict, index, total_referrals)
         if not email:
