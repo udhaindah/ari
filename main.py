@@ -8,21 +8,12 @@ import names
 from colorama import Fore, Style, init
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from fake_useragent import UserAgent  # Library untuk generate User-Agent
 
 init()
 
-ANDROID_USER_AGENTS = [
-    'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; SM-A536B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; SM-A346B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; SM-A236B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; M2101K6G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 12; moto g(30)) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 12; CPH2211) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 13; V2169) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36'
-]
+# Inisialisasi UserAgent
+ua = UserAgent()
 
 def get_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -58,7 +49,7 @@ def get_random_domain(proxy_dict, current=None, total=None):
     url = f"https://generator.email/search.php?key={keyword}"
     
     try:
-        headers = {'User-Agent': random.choice(ANDROID_USER_AGENTS)}
+        headers = {'User-Agent': ua.random}  # Gunakan User-Agent acak
         resp = requests.get(url, proxies=proxy_dict, headers=headers, timeout=120)
         resp.raise_for_status()
         domains = resp.json()
@@ -126,7 +117,7 @@ def check_inbox(email, proxy_dict, retries=9, current=None, total=None):
         'cookie': f'embx=%5B%{email}%40{email_domain}%22%2C%{email}%40{email_domain}%22%5D; surl={email_domain}/{email_username}',
         'sec-ch-ua-mobile': '?1',
         'sec-ch-ua-platform': '"Android"',
-        'user-agent': random.choice(ANDROID_USER_AGENTS)
+        'user-agent': ua.random  # Gunakan User-Agent acak
     }
 
     pattern = r'<b style="letter-spacing: 16px; color: #fff; font-size: 40px; font-weight: 600;[^>]*>(\d{6})</b>'
@@ -322,7 +313,7 @@ def main():
     headers = {
         'Accept': "application/json",
         'Accept-Encoding': "gzip",
-        'User-Agent': random.choice(ANDROID_USER_AGENTS)
+        'User-Agent': ua.random  # Gunakan User-Agent acak
     }
     
     with ThreadPoolExecutor(max_workers=10) as executor:
