@@ -5,12 +5,105 @@ import string
 from colorama import Fore, Style, init
 from datetime import datetime
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from fake_useragent import UserAgent
 
 init()
 
-ua = UserAgent()
+ANDROID_USER_AGENTS = [
+    'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; SM-A536B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; SM-A346B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; SM-A236B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; M2101K6G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 12; moto g(30)) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 12; CPH2211) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; V2169) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36'
+]
+
+class TempMailClient:
+    def __init__(self, proxy_dict=None):
+        self.base_url = "https://smailpro.com/app"
+        self.inbox_url = "https://app.sonjj.com/v1/temp_gmail"
+        self.headers = {
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9',
+            'user-agent': random.choice(ANDROID_USER_AGENTS),
+            'origin': 'https://smailpro.com',
+            'referer': 'https://smailpro.com/'
+        }
+        self.proxy_dict = proxy_dict
+        self.email_address = None
+        self.key = None
+        self.payload = None
+
+    def create_email(self) -> dict:
+        url = f"{self.base_url}/create"
+        params = {
+            'username': 'random',
+            'type': 'alias',
+            'domain': 'gmail.com',
+            'server': '1'
+        }
+        
+        response = requests.get(url, params=params, headers=self.headers, proxies=self.proxy_dict)
+        data = response.json()
+        
+        self.email_address = data['address']
+        self.key = data['key']
+        
+        return data
+
+    def create_inbox(self) -> dict:
+        url = f"{self.base_url}/inbox"
+        payload = [{
+            "address": self.email_address,
+            "timestamp": int(time.time()),
+            "key": self.key
+        }]
+        
+        response = requests.post(url, json=payload, headers=self.headers, proxies=self.proxy_dict)
+        data = response.json()
+        
+        if data:
+            self.payload = data[0]['payload']
+        
+        return data[0]
+
+    def get_inbox(self) -> dict:
+        url = f"{self.inbox_url}/inbox"
+        params = {'payload': self.payload}
+        
+        response = requests.get(url, params=params, headers=self.headers, proxies=self.proxy_dict)
+        return response.json()
+
+    def get_message_token(self, mid: str) -> str:
+        url = f"{self.base_url}/message"
+        params = {
+            'email': self.email_address,
+            'mid': mid
+        }
+        
+        response = requests.get(url, params=params, headers=self.headers, proxies=self.proxy_dict)
+        return response.text
+
+    def get_message_content(self, token: str) -> dict:
+        url = f"{self.inbox_url}/message"
+        params = {'payload': token}
+        
+        response = requests.get(url, params=params, headers=self.headers, proxies=self.proxy_dict)
+        return response.json()
+
+    def extract_otp(self, html_content: str) -> str:
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            otp_element = soup.find('b', style=lambda value: value and 'letter-spacing:16px' in value)
+            if otp_element:
+                return otp_element.text.strip()
+            return None
+        except Exception as e:
+            log(f"Error extracting OTP: {e}", Fore.RED)
+            return None
 
 def get_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -80,7 +173,7 @@ def verify_otp(email, valid_code, password, proxy_dict, invite_code, headers, cu
         log(f"Success Register with referral code {invite_code}", Fore.GREEN, current, total)
 
         with open("accounts.txt", "a") as file:
-            file.write(f"ID: {result['result']['session_code']}\nEmail: {email}\nPassword: {password}\nAddress: {result['result']['address']}\nPrivate Key: {result['result']['master_key']}\n")
+            file.write(f"ID: {result['result']['session_code']}\nEmail: {email}\nPassword: {password}\nAddress: {result['result']['address']}\nPrivate Key: {result['result']['master_key']}\n\n")
 
         return result['result']['address']
 
@@ -165,7 +258,7 @@ def get_referral_count():
 
 def get_target_address():
     while True:
-        address = ask('Enter target address for auto-send: ').strip()
+        address = ask('Enter main account address for auto-send: ').strip()
         if address:
             return address
         log('Please enter a valid address.', Fore.YELLOW)
@@ -177,93 +270,9 @@ def get_referral_code():
             return code
         log('Please enter a valid referral code.', Fore.YELLOW)
 
-class TempMailClient:
-    def __init__(self, proxy_dict=None):
-        self.base_url = "https://smailpro.com/app"
-        self.inbox_url = "https://app.sonjj.com/v1/temp_gmail"
-        self.headers = {
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
-            'user-agent': ua.android,
-            'origin': 'https://smailpro.com',
-            'referer': 'https://smailpro.com/'
-        }
-        self.proxy_dict = proxy_dict
-        self.email_address = None
-        self.key = None
-        self.payload = None
-
-    def create_email(self) -> dict:
-        url = f"{self.base_url}/create"
-        params = {
-            'username': 'random',
-            'type': 'alias',
-            'domain': 'gmail.com',
-            'server': '1'
-        }
-        
-        response = requests.get(url, params=params, headers=self.headers, proxies=self.proxy_dict)
-        data = response.json()
-        
-        self.email_address = data['address']
-        self.key = data['key']
-        
-        return data
-
-    def create_inbox(self) -> dict:
-        url = f"{self.base_url}/inbox"
-        payload = [{
-            "address": self.email_address,
-            "timestamp": int(time.time()),
-            "key": self.key
-        }]
-        
-        response = requests.post(url, json=payload, headers=self.headers, proxies=self.proxy_dict)
-        data = response.json()
-        
-        if data:
-            self.payload = data[0]['payload']
-        
-        return data[0]
-
-    def get_inbox(self) -> dict:
-        url = f"{self.inbox_url}/inbox"
-        params = {'payload': self.payload}
-        
-        response = requests.get(url, params=params, headers=self.headers, proxies=self.proxy_dict)
-        return response.json()
-
-    def get_message_token(self, mid: str) -> str:
-        url = f"{self.base_url}/message"
-        params = {
-            'email': self.email_address,
-            'mid': mid
-        }
-        
-        response = requests.get(url, params=params, headers=self.headers, proxies=self.proxy_dict)
-        return response.text
-
-    def get_message_content(self, token: str) -> dict:
-        url = f"{self.inbox_url}/message"
-        params = {'payload': token}
-        
-        response = requests.get(url, params=params, headers=self.headers, proxies=self.proxy_dict)
-        return response.json()
-
-    def extract_otp(self, html_content: str) -> str:
-        try:
-            soup = BeautifulSoup(html_content, 'html.parser')
-            otp_element = soup.find('b', style=lambda value: value and 'letter-spacing:16px' in value)
-            if otp_element:
-                return otp_element.text.strip()
-            return None
-        except Exception as e:
-            log(f"Error extracting OTP: {e}", Fore.RED)
-            return None
-
 def process_single_referral(index, total_referrals, proxy_dict, target_address, ref_code, headers):
     try:
-        log(f"Starting referral #{index}", Fore.CYAN, index, total_referrals)
+        print(f"{Fore.CYAN}\nStarting new referral process\n{Style.RESET_ALL}")
 
         mail_client = TempMailClient(proxy_dict)
         
@@ -283,7 +292,7 @@ def process_single_referral(index, total_referrals, proxy_dict, target_address, 
         mail_client.create_inbox()
         valid_code = None
         
-        for _ in range(60):
+        for _ in range(30):
             inbox = mail_client.get_inbox()
             if inbox.get('messages'):
                 message = inbox['messages'][0]
@@ -293,7 +302,7 @@ def process_single_referral(index, total_referrals, proxy_dict, target_address, 
                 if valid_code:
                     log(f"Found OTP: {valid_code}", Fore.GREEN, index, total_referrals)
                     break
-            time.sleep(1)
+            time.sleep(2)
             mail_client.create_inbox()
 
         if not valid_code:
@@ -334,24 +343,16 @@ def main():
     headers = {
         'Accept': "application/json",
         'Accept-Encoding': "gzip",
-        'User-Agent': ua.android
+        'User-Agent': random.choice(ANDROID_USER_AGENTS)
     }
     
     successful_referrals = 0
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = []
-        for index in range(1, total_referrals + 1):
-            proxy = get_random_proxy(proxies)
-            proxy_dict = {"http": proxy, "https": proxy} if proxy else None
-            
-            futures.append(executor.submit(process_single_referral, index, total_referrals, proxy_dict, target_address, ref_code, headers))
-            
-            # Jeda waktu untuk menghindari overload
-            time.sleep(5)
+    for index in range(1, total_referrals + 1):
+        proxy = get_random_proxy(proxies)
+        proxy_dict = {"http": proxy, "https": proxy} if proxy else None
         
-        for future in as_completed(futures):
-            if future.result():
-                successful_referrals += 1
+        if process_single_referral(index, total_referrals, proxy_dict, target_address, ref_code, headers):
+            successful_referrals += 1
     
     print(f"{Fore.MAGENTA}\nCompleted {successful_referrals}/{total_referrals} successful referrals{Style.RESET_ALL}")
 
